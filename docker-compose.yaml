@@ -1,0 +1,65 @@
+version: '3.8'
+
+services:
+  # Llama Stack server (using SQLite, no external database required)
+  llama-stack:
+    image: quay.io/opendatahub/llama-stack:latest
+    container_name: llama-stack
+    ports:
+      - "${SERVER_PORT:-8321}:8321"
+    environment:
+      # Configuration file path
+      RUN_CONFIG_PATH: /opt/app-root/config.yaml
+
+      # Inference providers
+      ENABLE_VLLM: ${ENABLE_VLLM:-}
+      VLLM_URL: ${VLLM_URL:-}
+      VLLM_API_KEY: ${VLLM_API_KEY:-}
+      VLLM_MAX_TOKENS: ${VLLM_MAX_TOKENS:-4096}
+      VLLM_TLS_VERIFY: ${VLLM_TLS_VERIFY:-true}
+
+      ENABLE_OLLAMA: ${ENABLE_OLLAMA:-}
+      OLLAMA_URL: ${OLLAMA_URL:-}
+
+      ENABLE_OPENAI: ${ENABLE_OPENAI:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+
+      ENABLE_VERTEX_AI: ${ENABLE_VERTEX_AI:-}
+      VERTEX_AI_PROJECT: ${VERTEX_AI_PROJECT:-}
+      VERTEX_AI_LOCATION: ${VERTEX_AI_LOCATION:-}
+
+      # Embeddings
+      ENABLE_SENTENCE_TRANSFORMERS: ${ENABLE_SENTENCE_TRANSFORMERS:-}
+
+      # Safety configuration
+      SAFETY_URL: ${SAFETY_URL:-http://host.docker.internal:11434/v1}
+      SAFETY_API_KEY: ${SAFETY_API_KEY:-token}
+      SAFETY_MODEL: ${SAFETY_MODEL:-llama-guard3:8b}
+
+    volumes:
+      # Mount configuration file
+      - ./config.yaml:/opt/app-root/config.yaml:ro
+
+      # Mount RAG content (embeddings model, vector DBs)
+      # IMPORTANT: Update this path to your actual rag-content directory
+      - ${RAG_CONTENT_PATH:-./rag-content}:/rag-content:ro
+
+      # Temporary files and SQLite databases
+      - llama-stack-tmp:/tmp
+
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8321/alpha/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+    # Allow container to access host services (for external vLLM, Ollama, etc.)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  # Llama Stack temporary files and SQLite databases
+  llama-stack-tmp:
+    driver: local

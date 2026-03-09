@@ -1,0 +1,267 @@
+#
+#
+# Copyright Red Hat
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# Llama Stack 0.5.0 Configuration
+# Migrated from 0.3.5 run.yaml
+
+version: 2
+image_name: redhat-ai-dev-llama-stack
+
+# All APIs supported in 0.5.0
+apis:
+  - agents
+  - batches
+  - datasetio
+  - eval
+  - inference
+  - safety
+  - scoring
+  - tool_runtime
+  - vector_io
+  - files
+
+providers:
+  # ===== INFERENCE PROVIDERS =====
+  inference:
+    # vLLM inference provider (primary)
+    - provider_id: ${env.ENABLE_VLLM:+vllm}
+      provider_type: remote::vllm
+      config:
+        base_url: ${env.VLLM_URL:=}
+        api_token: ${env.VLLM_API_KEY:=}
+        max_tokens: ${env.VLLM_MAX_TOKENS:=4096}
+        tls_verify: ${env.VLLM_TLS_VERIFY:=true}
+
+    # Ollama inference provider (optional)
+    - provider_id: ${env.ENABLE_OLLAMA:+ollama}
+      provider_type: remote::ollama
+      config:
+        url: ${env.OLLAMA_URL:=http://localhost:11434}
+
+    # OpenAI inference provider (optional)
+    - provider_id: ${env.ENABLE_OPENAI:+openai}
+      provider_type: remote::openai
+      config:
+        api_key: ${env.OPENAI_API_KEY:=}
+        base_url: ${env.OPENAI_BASE_URL:=https://api.openai.com/v1}
+
+    # Vertex AI inference provider (optional)
+    - provider_id: ${env.ENABLE_VERTEX_AI:+vertexai}
+      provider_type: remote::vertexai
+      config:
+        project: ${env.VERTEX_AI_PROJECT:=}
+        location: ${env.VERTEX_AI_LOCATION:=us-central1}
+
+    # Sentence Transformers for embeddings
+    - provider_id: ${env.ENABLE_SENTENCE_TRANSFORMERS:+sentence-transformers}
+      provider_type: inline::sentence-transformers
+      config: {}
+
+    # Safety model endpoint (used by inline::llama-guard)
+    - provider_id: safety-guard
+      provider_type: remote::vllm
+      config:
+        base_url: ${env.SAFETY_URL:=http://host.docker.internal:11434/v1}
+        api_token: ${env.SAFETY_API_KEY:=token}
+
+  # ===== SAFETY PROVIDERS =====
+  # Use inline::llama-guard which wraps the vLLM endpoint
+  safety:
+    - provider_id: llama-guard
+      provider_type: inline::llama-guard
+      config:
+        excluded_categories: []
+
+  # ===== VECTOR I/O PROVIDERS =====
+  vector_io:
+    # FAISS vector store with SQLite metadata persistence
+    - provider_id: faiss
+      provider_type: inline::faiss
+      config:
+        persistence:
+          backend: faiss_kv
+          namespace: vector_io::faiss
+
+  # ===== TOOL RUNTIME PROVIDERS =====
+  tool_runtime:
+    # Model Context Protocol for tool integration
+    - provider_id: model-context-protocol
+      provider_type: remote::model-context-protocol
+      config: {}
+
+    # RAG runtime for retrieval augmented generation
+    - provider_id: rag-runtime
+      provider_type: inline::rag-runtime
+      config: {}
+
+  # ===== FILES PROVIDERS =====
+  files:
+    # Local filesystem provider with SQLite metadata
+    - provider_id: localfs
+      provider_type: inline::localfs
+      config:
+        storage_dir: /tmp/llama-stack-files
+        metadata_store:
+          backend: sql_files
+          table_name: files_metadata
+
+  # ===== AGENTS PROVIDERS =====
+  agents:
+    # Meta reference agent implementation
+    - provider_id: meta-reference
+      provider_type: inline::meta-reference
+      config:
+        persistence:
+          agent_state:
+            backend: kv_default
+            namespace: agents::meta_reference
+          responses:
+            backend: sql_default
+            table_name: agents_responses
+            max_write_queue_size: 10000
+            num_writers: 4
+
+  # ===== NEW 0.5.0 PROVIDERS =====
+
+  # Batches API provider
+  batches:
+    - provider_id: reference
+      provider_type: inline::reference
+      config:
+        kvstore:
+          namespace: batches
+          backend: kv_default
+
+  # Dataset I/O providers
+  datasetio:
+    - provider_id: localfs
+      provider_type: inline::localfs
+      config:
+        kvstore:
+          backend: kv_default
+          namespace: datasetio::localfs
+
+  # Evaluation providers (placeholder for future use)
+  eval: []
+
+  # Scoring providers
+  scoring:
+    - provider_id: basic
+      provider_type: inline::basic
+      config: {}
+    - provider_id: llm-as-judge
+      provider_type: inline::llm-as-judge
+      config: {}
+
+# ===== STORAGE CONFIGURATION =====
+# Using SQLite for all storage backends (simple, no external database required)
+# For production with high concurrency, consider PostgreSQL instead
+storage:
+  backends:
+    # Key-Value store backend (SQLite)
+    kv_default:
+      type: kv_sqlite
+      db_path: /tmp/kvstore.db
+
+    # SQL store backend (SQLite)
+    sql_default:
+      type: sql_sqlite
+      db_path: /tmp/sql_store.db
+
+    # Files metadata backend (SQLite)
+    sql_files:
+      type: sql_sqlite
+      db_path: /rag-content/vector_db/rhdh_product_docs/1.9/files_metadata.db
+
+    # FAISS persistence backend (SQLite)
+    faiss_kv:
+      type: kv_sqlite
+      db_path: /rag-content/dynamic_rag/faiss_store.db
+
+  stores:
+    # Registry metadata store
+    metadata:
+      backend: faiss_kv
+      namespace: registry
+
+    # Inference results store
+    inference:
+      backend: sql_default
+      table_name: inference_store
+      max_write_queue_size: 10000
+      num_writers: 4
+
+    # Conversations store
+    conversations:
+      backend: sql_default
+      table_name: openai_conversations
+
+# ===== REGISTERED RESOURCES =====
+registered_resources:
+  # Models
+  models:
+    # Sentence Transformers embedding model
+    # Using local model from mounted volume at /rag-content/embeddings_model
+    - model_id: sentence-transformers/all-mpnet-base-v2
+      model_type: embedding
+      provider_id: sentence-transformers
+      provider_model_id: /rag-content/embeddings_model
+      metadata:
+        embedding_dimension: 768
+
+    # Llama Guard safety model
+    - model_id: ${env.SAFETY_MODEL:=llama-guard3:8b}
+      model_type: llm
+      provider_id: safety-guard
+      provider_model_id: ${env.SAFETY_MODEL:=llama-guard3:8b}
+      metadata: {}
+
+  # Shields
+  shields:
+    # Llama Guard shield for content safety
+    - shield_id: llama-guard-shield
+      provider_id: llama-guard
+      provider_shield_id: safety-guard/${env.SAFETY_MODEL:=llama-guard3:8b}
+
+  # Vector Databases
+  vector_dbs:
+    # RHDH product documentation vector database
+    - vector_db_id: rhdh-product-docs-1_8
+      embedding_model: sentence-transformers/all-mpnet-base-v2
+      embedding_dimension: 768
+      provider_id: faiss
+
+  # Tool Groups
+  tool_groups:
+    # RAG tools for retrieval augmented generation
+    - toolgroup_id: builtin::rag
+      provider_id: rag-runtime
+
+  # Empty placeholders for other resource types
+  datasets: []
+  scoring_fns: []
+  benchmarks: []
+
+# ===== VECTOR STORES CONFIGURATION =====
+# New in 0.5.0: citation and annotation configuration
+vector_stores:
+  annotation_prompt_params:
+    enable_annotations: true
+    annotation_instruction_template: "Cite sources immediately at the end of sentences using <|file-id|> format."
+
+# ===== SERVER CONFIGURATION =====
+server:
+  port: 8321
